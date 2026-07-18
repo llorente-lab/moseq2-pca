@@ -440,24 +440,31 @@ def get_env_cpu_and_mem():
     is_slurm = os.environ.get('SLURM_JOBID', False)
 
     if is_slurm:
-        click.echo('Detected slurm environment, using "sacct" to detect cpu and memory requirements')
-        cmd = f'sacct -j {is_slurm} --format AllocCPUS,ReqMem -X -n -p'
-        output = subprocess.check_output(cmd.split(' '))
-        output = output.decode('utf-8').strip().split('|')
-        cpu, mem, _ = output
-        cpu = max(1, int(cpu)-1)
+        click.echo('Detected slurm environment')
+        try:
+            cmd = f'sacct -j {is_slurm} --format AllocCPUS,ReqMem -X -n -p'
+            output = subprocess.check_output(cmd.split(' '))
+            output = output.decode('utf-8').strip().split('|')
+            cpu, mem, _ = output
+            cpu = max(1, int(cpu) - 1)
 
-        if 'G' in mem:
-            # account for additional processes that needs memory
-            mem = float(mem[:mem.index('G')]) * 1e9 * 0.8
-        elif 'M' in mem:
-            # account for additional processes that needs memory
-            mem = float(mem[:mem.index('M')]) * 1e6 * 0.8
-    else:
-        mem = psutil.virtual_memory().available * 0.8
-        cpu = max(1, psutil.cpu_count() - 1)
+            if 'G' in mem:
+                mem = float(mem[:mem.index('G')]) * 1e9 * 0.8
+            elif 'M' in mem:
+                mem = float(mem[:mem.index('M')]) * 1e6 * 0.8
+            return mem, cpu
+        except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
+            # sacct unavailable (e.g. inside a container) — fall back to env vars
+            pass
 
-    return mem, cpu
+        cpu_env = os.environ.get('SLURM_CPUS_PER_TASK') or os.environ.get('SLURM_CPUS_ON_NODE')
+        mem_env = os.environ.get('SLURM_MEM_PER_NODE')  # in MB
+        if cpu_env and mem_env:
+            click.echo('sacct unavailable; using SLURM_* env vars for allocation')
+            return float(mem_env) * 1e6 * 0.8, max(1, int(cpu_env) - 1)
+
+    click.echo('Falling back to psutil for cpu/memory detection')
+    return psutil.virtual_memory().available * 0.8, max(1, psutil.cpu_count() - 1)
 
 
 def initialize_dask(nworkers=50, processes=1, memory='4GB', cores=1,
