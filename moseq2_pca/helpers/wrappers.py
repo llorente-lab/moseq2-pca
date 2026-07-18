@@ -173,7 +173,7 @@ def train_pca_wrapper(input_dir, config_data, output_dir, output_file):
         logging.error(e)
         logging.error(e.__traceback__)
         click.echo('Training interrupted. Closing Dask Client. You may find logs of the error here:')
-        click.echo('---- ', join(output_dir, 'train.log'))
+        click.echo('---- ' + join(output_dir, 'train.log'))
     finally:
         # After Success or failure: Shutting down Dask client and clearing any residual data
         close_dask(client, cluster, config_data['timeout'])
