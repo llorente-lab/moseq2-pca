@@ -174,6 +174,7 @@ def train_pca_dask(dask_array, clean_params, use_fft, rank, cluster_type, client
         click.echo('Found mask, applying to training data')
         missing_data = True
         dask_array[mask] = 0
+        mask = mask.rechunk({1: -1, 2: -1})
         mask = mask.reshape(len(mask), -1)
 
     # Apply filters
@@ -191,7 +192,10 @@ def train_pca_dask(dask_array, clean_params, use_fft, rank, cluster_type, client
             lambda x: np.fft.fftshift(np.abs(np.fft.fft2(x)), axes=(1, 2)),
             dtype='float32')
 
-    # Reshape the data to 2D matrix
+    # Reshape the data to 2D matrix. Merge H,W into a single chunk first so
+    # the reshape is per-block and dask doesn't emit the "Reshaping is
+    # producing a large chunk" PerformanceWarning.
+    dask_array = dask_array.rechunk({1: -1, 2: -1})
     dask_array = dask_array.reshape(len(dask_array), -1).astype('float32')
 
     if cluster_type == 'slurm':
@@ -378,6 +382,7 @@ def apply_pca_dask(pca_components, h5s, yamls, use_fft, clean_params,
             mask = da.logical_and(mask < mask_params['mask_threshold'],
                                   frames > mask_params['mask_height_threshold'])
             frames[mask] = 0
+            mask = mask.rechunk({1: -1, 2: -1})
             mask = mask.reshape(-1, frames.shape[1] * frames.shape[2])
 
         # Apply filters
@@ -393,7 +398,10 @@ def apply_pca_dask(pca_components, h5s, yamls, use_fft, clean_params,
                 lambda x: np.fft.fftshift(np.abs(np.fft.fft2(x)), axes=(1, 2)),
                 dtype='float32')
 
-        # Reshape data to 2D and compute scores
+        # Reshape data to 2D and compute scores. rechunk axes 1,2 to a single
+        # chunk first so the reshape is per-block (avoids the dask
+        # "large chunk" PerformanceWarning).
+        frames = frames.rechunk({1: -1, 2: -1})
         frames = frames.reshape(-1, frames.shape[1] * frames.shape[2])
         scores = frames.dot(pca_components.T)
 
@@ -504,7 +512,8 @@ def get_changepoints_dask(changepoint_params, pca_components, h5s, yamls,
                                   frames > mask_params['mask_height_threshold'])
             frames[mask] = 0
 
-            # Reshape mask
+            # Reshape mask (rechunk axes 1,2 to a single chunk so reshape is per-block)
+            mask = mask.rechunk({1: -1, 2: -1})
             mask = mask.reshape(-1, frames.shape[1] * frames.shape[2])
 
             # Load scores
@@ -520,6 +529,7 @@ def get_changepoints_dask(changepoint_params, pca_components, h5s, yamls,
             # Load scores into dask
             scores = da.from_array(scores, chunks=(frames.chunks[0], scores.shape[1]))
 
+        frames = frames.rechunk({1: -1, 2: -1})
         frames = frames.reshape(-1, frames.shape[1] * frames.shape[2])
 
         if missing_data:
